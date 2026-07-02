@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AES-128: Deep Dive &amp; Theory</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card-bg: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent: #58a6ff;
+            --green: #3fb950;
+            --orange: #d2991d;
+            --purple: #a371f7;
+            --radius: 10px;
+            --font-mono: 'SF Mono', 'Cascadia Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+            --font-sans: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            line-height: 1.7;
+        }
+
+        h1, h2, h3 {
+            color: #e6edf3;
+            margin-top: 2em;
+            margin-bottom: 0.6em;
+        }
+        h1 { font-size: 2rem; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+        h2 { font-size: 1.5rem; border-left: 4px solid var(--accent); padding-left: 12px; }
+        h3 { font-size: 1.2rem; color: var(--green); }
+        p, li { color: var(--text); }
+        code {
+            background: #1c2129;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+            color: #e6edf3;
+            border: 1px solid var(--border);
+        }
+        pre {
+            background: #0d1117;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            overflow-x: auto;
+            font-family: var(--font-mono);
+            font-size: 0.85em;
+            line-height: 1.5;
+            color: #c9d1d9;
+        }
+        .flowchart {
+            text-align: center;
+            margin: 2em 0;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            background: var(--card-bg);
+        }
+        .flowchart img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+        }
+        .footnote {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 2em;
+            border-top: 1px solid var(--border);
+            padding-top: 1em;
+        }
+        .highlight {
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .inline-math {
+            font-family: var(--font-mono);
+            color: #d2a8ff;
+        }
+        .btn-back {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 8px 18px;
+            border-radius: 8px;
+            background: #1c2129;
+            border: 1.5px solid var(--border);
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-back:hover {
+            background: #222731;
+            border-color: #5a6270;
+            color: #e6edf3;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🔐 AES-128 Encryption – Theory &amp; Mathematics</h1>
+
+    <p>
+        The <strong>Advanced Encryption Standard (AES)</strong> is a symmetric block cipher that operates on 128‑bit (16‑byte) blocks under a 128‑, 192‑, or 256‑bit key.  
+        This page focuses on <strong>AES‑128</strong> (10 rounds), the same algorithm implemented in the interactive tool.  
+        We’ll explore why it uses matrix operations, the role of finite fields, the key schedule, and the linear algebra that makes decryption possible.
+    </p>
+
+    <!-- Flowchart Image -->
+    <div class="flowchart">
+        <img src="aesflow.png" alt="AES Flowchart" />
+        
+    </div>
+
+    <h2>1. The AES State and Basic Structure</h2>
+    <p>
+        AES treats a 16‑byte input as a <strong>4×4 matrix of bytes</strong>, called the <strong>state</strong>.  
+        Each byte is an element of the finite field <code>GF(2<sup>8</sup>)</code>.  
+        The encryption process applies four transformations in each round:
+    </p>
+    <ul>
+        <li><span class="highlight">SubBytes</span> – non‑linear byte substitution using an S‑box.</li>
+        <li><span class="highlight">ShiftRows</span> – cyclic left shifts of the state rows (permutation).</li>
+        <li><span class="highlight">MixColumns</span> – linear mixing of each column using matrix multiplication over <code>GF(2<sup>8</sup>)</code> (omitted in the final round).</li>
+        <li><span class="highlight">AddRoundKey</span> – XOR with a 128‑bit round key derived from the cipher key.</li>
+    </ul>
+    <p>
+        Before the first round, an initial <code>AddRoundKey</code> is performed.  
+        Decryption reverses these steps with the inverse transformations.
+    </p>
+
+    <!-- Encryption Walkthrough -->
+    <h2>2. Encryption Process in Detail</h2>
+    <p>
+        The encryption of a 16‑byte plaintext block proceeds as follows:
+    </p>
+    <ol>
+        <li><strong>Initial AddRoundKey</strong>: XOR the state with the 0‑th round key.</li>
+        <li><strong>For rounds 1 to 9</strong>:
+            <ul>
+                <li><span class="highlight">SubBytes</span> – replace each byte using the S‑box.</li>
+                <li><span class="highlight">ShiftRows</span> – cyclically shift the rows left (row 1 by 1, row 2 by 2, row 3 by 3).</li>
+                <li><span class="highlight">MixColumns</span> – multiply each column by the MDS matrix.</li>
+                <li><span class="highlight">AddRoundKey</span> – XOR with the corresponding round key.</li>
+            </ul>
+        </li>
+        <li><strong>Final round (round 10)</strong>:
+            <ul>
+                <li>SubBytes</li>
+                <li>ShiftRows</li>
+                <li>AddRoundKey (NO MixColumns)</li>
+            </ul>
+        </li>
+    </ol>
+    <p>
+        Omitting MixColumns in the last round makes the cipher a true involution when the inverse operations are applied in reverse order.  
+        The full encryption routine in pseudo‑code looks exactly like the C++ implementation in the tool:
+    </p>
+    <pre><code>matrix = plaintext
+matrix = AddRoundKey(matrix, roundKey[0])
+for r = 1 to 9:
+    matrix = SubBytes(matrix)
+    matrix = ShiftRows(matrix)
+    matrix = MixColumns(matrix)
+    matrix = AddRoundKey(matrix, roundKey[r])
+matrix = SubBytes(matrix)
+matrix = ShiftRows(matrix)
+matrix = AddRoundKey(matrix, roundKey[10])
+return matrix   // ciphertext</code></pre>
+
+    <!-- Decryption Walkthrough -->
+    <h2>3. Decryption Process – Reverse Order with Inverse Steps</h2>
+    <p>
+        Decryption must undo each transformation in the reverse order, using the inverse of every operation:
+    </p>
+    <ol>
+        <li><strong>Initial step</strong>: XOR with the last round key (round 10).</li>
+        <li><strong>For rounds 9 down to 1</strong>:
+            <ul>
+                <li><span class="highlight">InvShiftRows</span> – right shifts instead of left.</li>
+                <li><span class="highlight">InvSubBytes</span> – uses the inverse S‑box.</li>
+                <li><span class="highlight">AddRoundKey</span> – XOR with the round key of that round.</li>
+                <li><span class="highlight">InvMixColumns</span> – multiply each column by the inverse MDS matrix.</li>
+            </ul>
+        </li>
+        <li><strong>Final step</strong>:
+            <ul>
+                <li>InvShiftRows</li>
+                <li>InvSubBytes</li>
+                <li>AddRoundKey (round 0)</li>
+            </ul>
+        </li>
+    </ol>
+    <p>
+        Pseudo‑code for decryption:
+    </p>
+    <pre><code>matrix = ciphertext
+matrix = AddRoundKey(matrix, roundKey[10])
+for r = 9 downto 1:
+    matrix = InvShiftRows(matrix)
+    matrix = InvSubBytes(matrix)
+    matrix = AddRoundKey(matrix, roundKey[r])
+    matrix = InvMixColumns(matrix)
+matrix = InvShiftRows(matrix)
+matrix = InvSubBytes(matrix)
+matrix = AddRoundKey(matrix, roundKey[0])
+return matrix   // original plaintext</code></pre>
+
+    <p>
+        Because every operation is invertible, applying the inverse operations in the correct order recovers the original state exactly.
+    </p>
+
+    <h2>4. Galois Field GF(2<sup>8</sup>) – The Arithmetic Behind AES</h2>
+    <p>
+        AES performs all byte‑oriented operations in the finite field <strong>GF(2<sup>8</sup>) = GF(2)[x] / (x<sup>8</sup> + x<sup>4</sup> + x<sup>3</sup> + x + 1)</strong>.  
+        This means every byte represents a polynomial of degree ≤7 with coefficients in {0,1}.  
+        Addition is bitwise XOR, and multiplication is polynomial multiplication followed by reduction modulo the irreducible polynomial <code>m(x) = x<sup>8</sup> + x<sup>4</sup> + x<sup>3</sup> + x + 1</code>.
+    </p>
+    <p>
+        <strong>Why a finite field?</strong>  
+        Ordinary arithmetic would produce values outside 0–255, breaking the byte structure.  
+        The field ensures every non‑zero byte has a multiplicative inverse, which is essential for decryption.  
+        The S‑box is built from the multiplicative inverse in GF(2<sup>8</sup>) followed by an affine transformation, giving strong non‑linearity.
+    </p>
+    <p>
+        Example multiplication in code (the <code>gfmul</code> function):  
+        We repeatedly shift and conditionally XOR with <code>0x1b</code> (the reduction polynomial without the x<sup>8</sup> term).  
+        This implements polynomial multiplication modulo m(x).
+    </p>
+
+    <pre><code>function gfmul(a, b):
+    result = 0
+    while b > 0:
+        if b & 1: result ^= a
+        b >>= 1
+        a <<= 1
+        if a & 0x100: a ^= 0x1b   // reduce modulo m(x)
+        a &= 0xff
+    return result</code></pre>
+
+    <h2>5. Why Matrix Multiplication in MixColumns?</h2>
+    <p>
+        <strong>MixColumns</strong> treats each column of the state as a 4‑dimensional vector over GF(2<sup>8</sup>) and multiplies it by a fixed 4×4 matrix (the <em>MDS matrix</em>):
+    </p>
+    <pre><code>    [ 02 03 01 01 ]
+M = [ 01 02 03 01 ]
+    [ 01 01 02 03 ]
+    [ 03 01 01 02 ]</code></pre>
+    <p>
+        This operation provides <strong>diffusion</strong>: a change in one byte of the column spreads to all four output bytes.  
+        The matrix was carefully chosen to be <strong>Maximum Distance Separable (MDS)</strong>, meaning it achieves the maximum possible diffusion for a linear code.  
+        In practical terms, two different input columns can differ in at most 4 bytes, and after MixColumns they will differ in at least 5 bytes (when counting all columns together), making cryptanalysis harder.
+    </p>
+    <p>
+        <strong>Why is it linear?</strong>  
+        Matrix multiplication over a field is a linear transformation.  
+        This linearity is undone by the non‑linear SubBytes step, and together they form a substitution–permutation network that resists linear and differential attacks.
+    </p>
+
+    <h2>6. SubBytes and ShiftRows – Non‑linearity and Permutation</h2>
+    <p>
+        <strong>SubBytes</strong> replaces each byte with a value from the 16×16 S‑box.  
+        The S‑box is designed to be highly non‑linear (no linear relationship between input and output bits) and to have no fixed points.  
+        It is the only non‑linear component in AES, and it breaks the linearity of MixColumns, making the overall cipher resistant to linear cryptanalysis.
+    </p>
+    <p>
+        <strong>Is the S‑box linear? No.</strong> Many people think S‑box designs are linear because the construction uses an affine (linear) map, but the core is the <em>multiplicative inverse</em> in GF(2<sup>8</sup>), which is highly non‑linear. The affine transformation is added afterwards to complicate algebraic attacks. Crucially, the S‑box is a <strong>bijection</strong> (one‑to‑one and onto), so every possible byte appears exactly once. That’s why the inverse S‑box exists and decryption works. A non‑invertible S‑box would break decryption.
+    </p>
+    <p>
+        <strong>ShiftRows</strong> is a simple cyclic shift:
+    </p>
+    <ul>
+        <li>Row 0: no shift</li>
+        <li>Row 1: shift left by 1</li>
+        <li>Row 2: shift left by 2</li>
+        <li>Row 3: shift left by 3</li>
+    </ul>
+    <p>
+        This permutation moves bytes across columns, ensuring that the four bytes of each column are later mixed with bytes from other columns in the next MixColumns.
+    </p>
+
+    <!-- ========== EXPANDED KEY EXPANSION SECTION ========== -->
+    <h2>7. Key Expansion Algorithm – Deep Dive</h2>
+    <p>
+        The 128‑bit cipher key must be expanded into <strong>11 round keys</strong> of 128 bits each – one for the initial AddRoundKey and one for each of the 10 rounds.  
+        The key schedule uses a <strong>word‑oriented</strong> approach: it treats the key as 4 words (each word = 4 bytes) and generates a total of 44 words <code>W[0]…W[43]</code>.  
+        Each round key consists of 4 consecutive words.
+    </p>
+
+    <h3>7.1 The Algorithm Step by Step</h3>
+    <ol>
+        <li><strong>Initialisation</strong>: The first 4 words <code>W[0]…W[3]</code> are directly the cipher key bytes, taken in <em>column‑major order</em> (the same order as the state matrix).</li>
+        <li><strong>Iterative expansion</strong>: For <code>i = 4</code> to <code>43</code>:
+            <ul>
+                <li>Let <code>temp = W[i-1]</code>.</li>
+                <li>If <code>i</code> is a multiple of 4 (i.e., every 4th word):
+                    <ul>
+                        <li><strong>RotWord</strong>: rotate the word left by one byte: <code>[a0,a1,a2,a3] → [a1,a2,a3,a0]</code>.</li>
+                        <li><strong>SubWord</strong>: apply the AES S‑box to each of the four bytes.</li>
+                        <li><strong>XOR with Rcon</strong>: XOR the first byte of the result with a round constant <code>Rcon[i/4]</code>.</li>
+                    </ul>
+                </li>
+                <li>Finally, <code>W[i] = W[i-4] ⊕ temp</code>.</li>
+            </ul>
+        </li>
+    </ol>
+
+    <h3>7.2 Why the S‑box and Round Constants?</h3>
+    <p>
+        The key schedule reuses the same S‑box as SubBytes for two reasons:
+    </p>
+    <ul>
+        <li><strong>Non‑linearity</strong>: Without SubWord, the entire key schedule would be linear over GF(2<sup>8</sup>). An attacker knowing one round key could easily work backwards to recover the cipher key. The S‑box breaks that linearity, so the relationship between round keys is cryptographically complex.</li>
+        <li><strong>Diffusion</strong>: A small change in one byte of the cipher key (or one round key) propagates rapidly to many other round keys, a property called <em>full key diffusion</em>.</li>
+    </ul>
+    <p>
+        The <strong>round constants</strong> <code>Rcon[k]</code> are simply powers of 2 in the field GF(2<sup>8</sup>):
+    </p>
+    <pre><code>Rcon[1] = 0x01, Rcon[2] = 0x02, Rcon[3] = 0x04, Rcon[4] = 0x08, Rcon[5] = 0x10,
+Rcon[6] = 0x20, Rcon[7] = 0x40, Rcon[8] = 0x80, Rcon[9] = 0x1B, Rcon[10] = 0x36</code></pre>
+    <p>
+        They prevent the key schedule from being periodic. Without them, the same operations would be applied every 4 words, leading to symmetry that could be exploited in related‑key attacks. By XORing a different constant each round, every 4‑word block is distinct.
+    </p>
+
+    <h3>7.3 The Role of RotWord</h3>
+    <p>
+        RotWord is a simple byte rotation. It ensures that the four bytes of a word are mixed differently when they become the input to the S‑box. Combined with SubWord, it makes the key schedule act on each byte position in a unique way, preventing slide attacks where rounds would look identical.
+    </p>
+
+    <h3>7.4 Security Properties</h3>
+    <ul>
+        <li><strong>Invertibility</strong>: Given a round key, it is computationally infeasible to recover the original cipher key without knowing the entire schedule, thanks to the non‑linear SubWord steps.</li>
+        <li><strong>Diffusion</strong>: Flipping a single bit of the cipher key changes, on average, half the bits of all subsequent round keys.</li>
+        <li><strong>Resistance to related‑key attacks</strong>: The combination of non‑linearity (S‑box) and round constants makes it extremely hard to find two keys that produce related sets of round keys.</li>
+    </ul>
+
+    <p>
+        In the interactive tool, the function <code>keyexpand()</code> implements exactly this algorithm, storing all 11 round keys in the <code>keymap</code> array. The same expanded keys are used for both encryption and decryption.
+    </p>
+
+    <!-- ========== REST OF THE SECTIONS UNCHANGED ========== -->
+    <h2>8. Decryption and Inverse Operations</h2>
+    <p>
+        Decryption must invert each transformation (as described in the decryption walkthrough):
+    </p>
+    <ul>
+        <li><strong>InvSubBytes</strong> uses the inverse S‑box, which is the inverse function of the SubBytes S‑box.  
+            Because the S‑box is a bijection (one‑to‑one and onto), every byte has a unique inverse.</li>
+        <li><strong>InvShiftRows</strong> performs right shifts instead of left shifts:  
+            row 1 shifted right by 1, row 2 by 2, row 3 by 3.</li>
+        <li><strong>InvMixColumns</strong> multiplies each column by the inverse of the MixColumns matrix.  
+            The inverse matrix exists because the original matrix is invertible over GF(2<sup>8</sup>).  
+            The inverse matrix is:
+            <pre><code>      [ 0E 0B 0D 09 ]
+M⁻¹ = [ 09 0E 0B 0D ]
+      [ 0D 09 0E 0B ]
+      [ 0B 0D 09 0E ]</code></pre>
+        </li>
+        <li><strong>AddRoundKey</strong> is its own inverse, because XOR is its own inverse (XOR again with the same key).</li>
+    </ul>
+    <p>
+        The decryption order (already shown in section 3) is: AddRoundKey (round 10), then for rounds 9 down to 1: InvShiftRows → InvSubBytes → AddRoundKey → InvMixColumns,  
+        and finally InvShiftRows → InvSubBytes → AddRoundKey (round 0).
+    </p>
+
+    <h2>9. Why Does Inverse Multiplication Give the Identity?</h2>
+    <p>
+        The MixColumns matrix <code>M</code> is a 4×4 matrix over the field <code>GF(2<sup>8</sup>)</code>.  
+        Its determinant is non‑zero (in fact <code>det(M) = 0x01</code>), so it is invertible.  
+        By definition of matrix inverse, <code>M⁻¹ * M = I</code>, where <code>I</code> is the 4×4 identity matrix.  
+        When we apply <code>M⁻¹</code> after MixColumns during decryption, we recover the original column vector because:
+    </p>
+    <p class="inline-math" style="text-align:center; font-size:1.1em;">
+        M⁻¹ · (M · col) = (M⁻¹ · M) · col = I · col = col
+    </p>
+    <p>
+        This relies on the matrix being defined over a field where every non‑zero element has a multiplicative inverse.  
+        The inverse matrix entries (like <code>0x0E</code>, <code>0x0B</code>, etc.) are precisely the values that satisfy the identity when multiplied with the MixColumns matrix.
+    </p>
+
+    <h2>10. Linear Algebra Connections</h2>
+    <p>
+        AES mixes <strong>linear</strong> and <strong>non‑linear</strong> layers:
+    </p>
+    <ul>
+        <li>The <strong>linear transformations</strong> (ShiftRows, MixColumns, AddRoundKey) form a linear map from the state to itself over GF(2<sup>8</sup>).  
+            Together they can be represented as an invertible matrix that acts on the entire 128‑bit vector.</li>
+        <li>The <strong>non‑linear SubBytes</strong> breaks the linearity, making the overall cipher non‑linear and secure against linear cryptanalysis.</li>
+    </ul>
+    <p>
+        The choice of the MixColumns matrix is guided by coding theory: it is an <strong>MDS (Maximum Distance Separable) matrix</strong> derived from a Cauchy matrix construction.  
+        This guarantees that any non‑zero column vector produces an output where at least 5 of the 16 bytes (across all four columns) are non‑zero after two rounds, a property called <em>full diffusion</em>.  
+        The same matrix works for its own inverse because the MDS property is preserved under inversion.
+    </p>
+    <p>
+        If you look at the vector space (GF(2<sup>8</sup>))<sup>4</sup>, the MixColumns matrix is a linear operator.  
+        Linear algebra tells us that an operator is invertible if and only if its determinant is non‑zero.  
+        The designers chose <code>M</code> such that <code>det(M) = 01</code>, ensuring a simple inverse.
+    </p>
+
+    <h2>11. Putting It All Together</h2>
+    <p>
+        AES‑128 is a <strong>substitution‑permutation network (SPN)</strong> with 10 rounds, each composed of:
+    </p>
+    <ol>
+        <li><strong>SubBytes</strong> – 16 parallel non‑linear lookups (the heart of security).</li>
+        <li><strong>ShiftRows</strong> – byte‑level transposition across columns.</li>
+        <li><strong>MixColumns</strong> – multiplication by an MDS matrix for optimal diffusion.</li>
+        <li><strong>AddRoundKey</strong> – XOR with the round key.</li>
+    </ol>
+    <p>
+        The combination of these simple, mathematically sound operations yields a cipher that has withstood decades of cryptanalysis.  
+        Understanding the underlying fields and linear algebra helps appreciate why each step is necessary and how the inverse works.
+    </p>
+
+    <p class="footnote">
+        This explanation is tailored to the AES‑128 implementation you see in the interactive tool.  
+        All operations are byte‑wise and match the code exactly.  
+        For further reading, refer to the official FIPS‑197 specification or “The Design of Rijndael” by Daemen and Rijmen.
+    </p>
+
+    <a href="index.html" class="btn-back">← Back to Encryption Tool</a>
+
+</body>
+</html>
